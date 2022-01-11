@@ -1,0 +1,731 @@
+; Mario Santos, id: 199275
+; Pedro Cruz, id: 199297
+
+;=================================================================
+; CONSTANTS
+;-----------------------------------------------------------------
+; VETOR
+CHAO            TAB     80;     Onde o vetor sera guardado
+COUNTER         EQU     80;     Usado para mover posicoes do vetor
+                ORIG    1000h  
+SEED            WORD    1;      Seed para geracato
+; CATOS
+HMAX            EQU     4;      Altura maxima do cato, usado em geracato    
+COUNTERC        EQU     18;     Counter usado para definir a posicao a frente do
+                        ;       dinossauro
+; Stack
+STACK           EQU     7000h;  STACK
+; Dinossauro
+PES             WORD    2410h;  Posicao dos pes do dinossauro
+CICLOS          EQU     2
+MAX             WORD    0;      0 se ainda n atingiu altura max
+; Text window
+TERM_READ       EQU     FFFFh    ; Ler caracteres
+TERM_WRITE      EQU     FFFEh
+TERM_STATUS     EQU     FFFDh    ; Status (0-nao press. ; 1-precionada)
+TERM_CURSOR     EQU     FFFCh    ; Posicionar o cursor
+TERM_COLOR      EQU     FFFBh    ; Mudar as cores (nao usado)
+; 7 segment display
+DISP7_D0        EQU     FFF0h    ; display 0
+DISP7_D1        EQU     FFF1h    ; display 1
+DISP7_D2        EQU     FFF2h    ; display 2
+DISP7_D3        EQU     FFF3h    ; display 3
+DISP7_D4        EQU     FFEEh    ; display 4
+DISP7_D5        EQU     FFEFh    ; display 5
+; timer
+TIMER_CONTROL   EQU     FFF7h;   
+TIMER_COUNTER   EQU     FFF6h;    
+TIMER_SETSTART  EQU     1
+TIMER_SETSTOP   EQU     0 
+; interruptions
+INT_MASK        EQU     FFFAh
+INT_MASK_VAL    EQU     8009h
+TIME            WORD    0
+speed           word    0;       speed indica se o dinossauro esta a executar
+;                                um salto
+; String GAME OVER                
+GAMEOVERSTR     str     '              ╔═══  ╔═══╗ ╔┐ ┌╗ ╔════  ╔═══╗ ║     ║ ╔════ ╔════╗                             ║     ║   ║ ║ ═ ║ ║      ║   ║  ║   ║  ║     ║    ║                             ║     ║   ║ ║   ║ ║════  ║   ║  ║   ║  ║════ ║════╝                             ║ ══╗ ║═══║ ║   ║ ║      ║   ║   ║ ║   ║     ║  ║                               ║   ║ ║   ║ ║   ║ ║      ║   ║   ║ ║   ║     ║   ║                              ╚═══╝ ║   ║ ║   ║ ╚════  ╚═══╝    ═    ╚════ ║    ║                                                                                                                           Press "0" to play again                                                                                                                              Game created by Mario Santos and Pedro Cruz'
+;-----------------------------------------------------------------
+                ORIG    0000h
+                
+MAIN:           MVI     R6, STACK
+
+                MVI     R1, CHAO;    Vetor em R1
+                MVI     R2, COUNTER
+                MVI     R4, 4;       Posicao 0
+                DEC     R2
+                DEC     R2;          Decrementar + uma vez por causa da ultima 
+                          ;          posicao
+                STOR    M[R1], R4
+                INC     R1
+                MVI     R4, 0;       Posicoes livres das posicoes 2 - 70
+.LOOP:          
+                STOR    M[R1], R4;   Loop que cria os 0s do vetor
+                INC     R1
+                DEC     R2
+                
+                CMP     R2, R0
+                BR.NZ   .LOOP
+                
+                MVI     R4, 3;       Ultimo valor, coluna 80
+                STOR    M[R1], R4
+                
+                JAL     DESENHAJOGO; Para mostrar o jogo antes de pressionar 0
+;--------------------------------------------------------------------------                
+TIMERCOUNT_MAX  EQU     20;            Constantes usadas para nao gerar erros
+TIMERCOUNT_MIN  EQU     1;             no programa
+TIMERCOUNT_INIT EQU     10
+TIMER_TICK      equ     0               ; indica o numero de interrupcoes 
+;--------------------------------------------------------------------------
+
+MAIN2:          
+                ; Configurar rotinas 
+                ; Interromper a mascara
+                MVI     R1,INT_MASK
+                MVI     R2,INT_MASK_VAL
+                STOR    M[R1],R2
+                ; ativar interrupcoes
+                ENI
+loop0exist:        
+                load    r4, m[r1] ; loop para comecar o jogo,
+                CMP     R4, R0;     verifica se o botao 0 foi premido
+                BR.nz   loop0exist 
+                MVI     R2, TERM_CURSOR
+                MVI     R4, FFFFh;  limpa o terminal no inicio de cada jogo
+                STOR    M[R2], R4
+                jal     END
+
+                ; Iniciar temporizador
+                MVI     R2,TIMERCOUNT_INIT
+                MVI     R1,TIMER_COUNTER
+                STOR    M[R1],R2          
+                MVI     R1,TIMER_TICK
+                STOR    M[R1],R0          ; limpar todos os timer ticks
+                MVI     R1,TIMER_CONTROL
+                MVI     R2,TIMER_SETSTART
+                STOR    M[R1],R2
+
+                ORIG    7F00h
+KEYZERO:        ; Guardar contexto
+                DEC     R6
+                STOR    M[R6],R1
+                DEC     R6
+                STOR    M[R6],R2
+                ; mudar valor para sair do loop que verifica que o 0 existe
+                mvi     r4,0
+                stor    m[r1], r4
+                ; Carregar contexto
+                LOAD    R2,M[R6]
+                INC     R6
+                LOAD    R1,M[R6]
+                INC     R6
+                RTI
+                
+                ORIG    7F30h
+KEYUP:          ; Guardar contexto
+                DEC     R6
+                STOR    M[R6],R1
+                DEC     R6
+                STOR    M[R6],R7
+                MVI r1, speed;   indentificar que ha um salto, speed = 1 
+                mvi r2, 1
+                stor m[r1], r2
+                ; Carregar contexto
+                LOAD    R7,M[R6]
+                INC     R6
+                LOAD    R1,M[R6]
+                INC     R6
+                RTI
+
+END:            BR      .JOGO;     loop principal do jogo
+
+.JOGO:          DSI;                  DSI e ENI usados para evitar que as
+                JAL     TEMP;         interrupcoes "destruam" o jogo
+                JAL     atualizajogo; por haver mudanca de valores
+                JAL     DESENHAJOGO
+                JAL     DINO
+                JAL     SALTO
+                JAL     COLISOES
+                ENI
+                BR      .JOGO        
+                
+;======================================================
+; COLISOES - Deteta se o dinossauro foi contra um cato
+;======================================================
+                Orig    1500
+COLISOES:       MVI     R3, PES
+                LOAD    R3, M[R3]
+                
+                INC     R3;  pe da frente
+                
+                MVI     R2, CHAO; Carregar vetor em R2
+                LOAD    R2, M[R2] 
+                MVI     R4, 18
+                
+                BR      .LOOP
+                
+.LOOP:          DEC     R4;       loop que coloca a posicao do vetor logo a 
+                INC     R2;       direita do dinossauro
+                CMP     R4, R0
+                BR.NZ   .LOOP
+                
+                LOAD    R4, M[R2];Tirar o valor de R2 e colocar em R4
+                
+                CMP     R4, R0;   Comparacoes para verificar se ha cato ou nao
+                BR.Z    .RETURN;  e se houver, qual a sua altura
+                
+                MVI     R1, 1
+                CMP     R4, R1
+                BR.Z    .CATO1
+                
+                MVI     R1, 2
+                CMP     R2, R1
+                BR.Z    .CATO2
+                
+                MVI     R1, 3
+                CMP     R2, R1
+                BR.Z    .CATO3
+                
+                MVI     R1, 4
+                CMP     R2, R1
+                BR.Z    .CATO4
+                
+.CATO1:         ; para passar um cato com 1 de altura, R3 tem de estar acima de  
+                ; 2410   
+                MVI     R1, 2310h
+                CMP     R3, R1
+                BR.NN   GAMEOVER   
+                
+.CATO2:         ; para passar um cato com 2 de altura, R3 tem de estar acima de  
+                ; 2310
+                MVI     R1, 2210h
+                CMP     R3, R1
+                BR.NN   GAMEOVER   
+                
+.CATO3:         ; para passar um cato com 3 de altura, R3 tem de estar acima de  
+                ; 2210
+                MVI     R1, 2110h
+                CMP     R3, R1
+                BR.NN   GAMEOVER   
+                
+.CATO4:         ; para passar um cato com 4 de altura, R3 tem de estar acima de  
+                ; 2110 
+                MVI     R1, 2010h;   Cato va contra um cato, o jogo termina
+                CMP     R3, R1
+                BR.NN   GAMEOVER   
+                
+.RETURN:        JMP     R7
+
+GAMEOVER:       MVI     R2, TERM_CURSOR
+                MVI     R4, FFFFh;  limpa o terminal no inicio de cada jogo
+                STOR    M[R2], R4
+
+                MVI     R2, TERM_CURSOR
+                MVI     R1, 0500h
+
+                STOR    M[R2], R1
+                MVI     R2, GAMEOVERSTR
+
+.LOOP:          LOAD    R1, M[R2];   Loop que escreve a GAMEOVERSTR no terminal
+                CMP     R1, R0
+                BR.Z    FIM
+
+                mvi     R5, TERM_WRITE
+                STOR    M[R5], R1
+
+                INC     R2
+                BR      .LOOP
+
+FIM:            MVI     R5, speed;  coloca todas as variaveis nos seus valores
+                LOAD    R5, M[R5];  iniciais, para que o proximo jogo possa 
+                MVI     R4, 0;      ser iniciado sem erros
+                MVI     R2, speed
+                STOR    M[R2], R4
+                
+                MVI     R5, MAX
+                LOAD    R5, M[R5]
+                MVI     R4, 0
+                MVI     R2, MAX
+                STOR    M[R2], R4
+                
+                MVI     R3, PES; 
+                LOAD    R3, M[R3]
+                
+                MVI     R2, PES 
+                MVI     R3, 2410h
+                STOR    M[R2], R3
+                JAL     MAIN;      volta para a MAIN, o jogo e repetido
+
+;======================================================
+; SALTO - funcao que trata de um salto
+;======================================================
+
+SALTO:          MVI     R2, speed;    Verifica se a keyup alterou a variavel
+                LOAD    R2, M[R2];    speed (se e suposto comecar um salto)
+                CMP     R2, R0;       Se for 0, nao ha salto, se for diferente
+                BR.Z    .NJ;          Executa o salto
+
+                MVI     R3, PES
+                LOAD    R3, M[R3]
+                
+                MVI     R5, MAX;      MAX - altura maxima a que o dinossauro 
+                LOAD    R5, M[R5];          pode saltar, se foi atingida,
+                ;                           MAX = 1
+                CMP     R5, R0;       MAX != 0, foi atingida a altura maxima
+                BR.NZ   .DESCE;       logo o dinossauro desce
+                MVI     R4, 1910h;    Verifica se o dinossauro chegou a altura
+                CMP     R3, R4;       maxima, se sim inicia a descida
+                BR.Z    .DESCE
+                
+                ; SOBE
+                MVI     R1, TERM_WRITE;  O Dinossauro esta a subir, se MAX = 0
+                MVI     R2, TERM_CURSOR
+                STOR    M[R2], R3
+                MVI     R4, ' '
+                STOR    M[R1], R4
+                INC     R3
+                STOR    M[R1], R4
+                DEC     R3
+                
+                MVI     R2, 100h
+                SUB     R3, R3, R2;     As pernas do dinossauro vao uma posicao
+                ;                       para cima
+                BR      .RETURN
+                ;DESCE
+.DESCE:         MVI     R5, 1;          Se atingiu a altura maxima, MAX = 1
+                MVI     R2, MAX
+                STOR    M[R2], R5
+                
+                MVI     R2, 100h
+                SUB     R3, R3, R2;     APAGAR os caracteres que estao em cima
+                SUB     R3, R3, R2;     do dinossauro (esta a descer)
+                
+                MVI     R1, TERM_WRITE
+                MVI     R2, TERM_CURSOR
+                STOR    M[R2], R3
+                MVI     R4, ' '
+                STOR    M[R1], R4
+                INC     R3
+                STOR    M[R1], R4
+                DEC     R3
+                
+                MVI     R2, 100h
+                ADD     R3, R3, R2
+                ADD     R3, R3, R2
+                ADD     R3, R3, R2
+                
+                MVI     R4, 2410h;     Verifica se o dinossauro chegou ao chao
+                CMP     R3, R4;        se sim, speed = 0, acabou o salto, e
+                BR.Z    .BIT;          MAX = 0, pois esta pronto para outro
+                BR      .RETURN;       salto
+                
+.BIT:           MVI     R5, 0
+                MVI     R2, MAX
+                STOR    M[R2], R5
+                
+                MVI     R5, speed
+                LOAD    R5, M[R5]
+                MVI     R4, 0
+                MVI     R2, speed
+                STOR    M[R2], R4
+                
+                BR      .RETURN
+
+.RETURN:        MVI     R2, PES;      A posicao dos pes e guardada em memoria
+                STOR    M[R2], R3
+                JMP     R7;           
+                
+.NJ:            JMP     R7;   NJ- No Jump, nao ha salto, volta para o loop
+
+;======================================================
+; DESENHAJOGO - escreve no terminal o terreno de jogo
+;======================================================                
+                orig    1000
+DESENHAJOGO:    
+                STOR    M[R6], R7;    R7 guardado na pilha pois serao chamadas 
+                MVI     R5, COUNTER;  outras funcoes
+                INC     R6
+                STOR    M[R6], R5;    Guarda na pilha o valor do counter
+                MVI     R5, CHAO;     
+                INC     R6
+                STOR    M[R6], R5;     
+                
+                MVI     R3, 2500h;    nivel do solo (linha 25)
+                MVI     R2, TERM_CURSOR
+                MVI     R1, TERM_WRITE
+                STOR    M[R2], R3
+                
+.LOOP:          DEC     R6;           R6 esta a posicao do counter
+                LOAD    R5, M[R6];    Se for 0, acaba a funcao   
+                CMP     R5, R0;       Se nao, desenha mais terreno
+                BR.Z    .RETURN2
+                STOR    M[R2], R3;    Counter diminui e e guardado na pilha
+                DEC     R5
+                STOR    M[R6], R5
+                INC     R6
+                LOAD    R5, M[R6]
+                
+                JAL LIMPAR;         A funcao limpar, impede que os desenhos
+                ;                   de catos fiquem sobrepostos
+                LOAD    R4, M[R5]
+                CMP     R4, R0
+                BR.NZ   .BASE;      E desenhado chao caso nao haja cato
+                MVI     R4, '─'
+                STOR    M[R1], R4
+                INC     R5;         proxima posicao no vetor
+                INC     R3;         proxima posicao do cursor
+                MVI     R2, TERM_CURSOR
+                STOR    M[R6], R5
+                JAL     VERIFICAR_PD
+                BR      .LOOP
+                
+.BASE:          MVI     R2, '╨';    E desenhada a base do cato
+                
+                STOR    M[R1], R2
+                MVI     R2, TERM_CURSOR
+                JAL     .CATO
+                MVI     R1, 1
+                CMP     R4, R1
+                BR.NZ   .CATO2
+                
+                JAL     .TOPO;      E desenhado o topo do cato
+                MVI     R4, 1
+                JAL     .SALVARP
+                INC     R5
+                INC     R3
+                BR      .RETURN1
+                 
+.CATO2:         JAL     .DESENHAR;  Desenhar desenha o "meio" o cato
+                JAL     .CATO
+                MVI     R1, 2
+                CMP     R4, R1
+                BR.NZ   .CATO3
+                
+                JAL     .TOPO
+                MVI     R4, 2
+                JAL     .SALVARP
+                INC     R5
+                INC     R3
+                BR      .RETURN1
+                
+.CATO3:         JAL     .DESENHAR
+                JAL     .CATO;     .Cato aumenta a altura do cato
+                MVI     R1, 3
+                CMP     R4, R1
+                BR.NZ   .CATO4
+                
+                JAL     .TOPO
+                MVI     R4, 3
+                JAL     .SALVARP;  SALVARP, faz com o que o cursor desca ate ao 
+                INC     R5;        nivel do chao 
+                INC     R3
+                BR      .RETURN1
+                
+.RETURN1:       STOR    M[R6], R5; Guarda a posicao do vetor na pilha
+                BR      .LOOP;     E retorna ao loop
+                
+.RETURN2:       DEC     R6;        Carrega o R7 do loop principal e retorna
+                LOAD    R7, M[R6]
+                JMP     R7
+                
+.CATO4:         JAL     .DESENHAR
+                JAL     .CATO
+                MVI     R1, 4
+                CMP     R4, R1
+                BR.NZ   .CATO3
+                
+                JAL     .TOPO
+                MVI     R4, 4
+                JAL     .SALVARP
+                INC     R5
+                INC     R3
+                BR      .RETURN1
+                                
+
+.DESENHAR:      MVI     R1, TERM_WRITE
+                STOR    M[R2], R3
+                MVI     R2, '╟'
+                STOR    M[R1], R2
+                MVI     R2, TERM_CURSOR
+                JMP     R7
+                
+.TOPO:          STOR    M[R2], R3
+                MVI     R1, TERM_WRITE
+                MVI     R4, '╖'
+                STOR    M[R1], R4
+                JMP     R7
+                
+.CATO:          MVI     R1, 100h;      Soma 100h, ou seja, sobe uma linha
+                SUB     R3, R3, R1;    
+                MVI     R1, TERM_WRITE
+                JMP     R7
+                
+.SALVARP:       DEC     R4;            E diminuida a linha, o numero de vezes
+                MVI     R1, 100h;      que subiu para desenhar o cato, ou seja,
+                ADD     R3, R3, R1;    a altura do cato
+                
+                CMP     R4, R0
+                BR.NZ   .SALVARP
+                
+                MVI     R1, TERM_WRITE
+                JMP     R7
+                
+;======================================================
+; Dinossauro (Dino) - Desenhar o dinossauro
+;======================================================
+
+DINO:           STOR    M[R6], R7;  O dinossauro e composto por 6 caracteres
+                INC     R6;         Duas pernas e 4 "blocos para o corpo"
+                MVI     R3, PES;    Posicao dos pes e movida para R3, e esta 
+                LOAD    R3, M[R3];  e que define a sua posicao no ecra
+                
+                MVI     R5, CICLOS; Para fazer as duas colunas, foi usado um
+                MVI     R1, TERM_WRITE;   loop, que faz 2 CICLOS 
+                MVI     R2, TERM_CURSOR;  CICLOS = 2
+                
+.LOOP:          DEC     R5
+                STOR    M[R2], R3
+                MVI     R4, '┘';    Desenhar a perna
+                STOR    M[R1], R4
+                JAL     .CATO
+                
+                STOR    M[R2], R3
+                MVI     R4, '█';    Desenhar o "bloco"
+                STOR    M[R1], R4
+                
+                JAL     .CATO;      Subir a posicao
+                STOR    M[R2], R3;  
+                STOR    M[R1], R4;  .CATO e .SALVARP foram utilizadas novamente
+                
+                MVI     R4, 2
+                JAL     .SALVARP
+                INC     R3
+                
+                CMP     R5, R0
+                BR.NZ   .LOOP
+                
+                DEC     R6
+                LOAD    R7, M[R6]
+                JMP     R7
+
+.CATO:          MVI     R1, 100h
+                SUB     R3, R3, R1
+                MVI     R1, TERM_WRITE
+                JMP     R7
+                
+.SALVARP:       DEC     R4
+                MVI     R1, 100h
+                ADD     R3, R3, R1
+                
+                CMP     R4, R0
+                BR.NZ   .SALVARP; 
+                MVI     R1, TERM_WRITE; 
+                JMP     R7
+                
+;======================================================
+; LIMPAR - Remove catos preexistentes
+;======================================================     
+
+LIMPAR:         INC     R6;         Esta funcao limpa parcialmente o terminal.
+                STOR    M[R6], R7;  Em vez de dar refresh ao terminal, limpa a 
+                ;                   zona em que os catos sao desenhados
+                MVI     R4, '─';    Coloca chao
+                STOR    M[R1], R4
+                
+                JAL     .CATO
+                MVI     R4, ' ';    As strings vazias limpam os catos
+                STOR    M[R2], R3;  As funcoes .CATO e .SALVARP sao as mesmas 
+                STOR    M[R1], R4;  que as usadas em DESENHAJOGO
+                
+                JAL     .CATO
+                MVI     R4, ' '
+                STOR    M[R2], R3
+                STOR    M[R1], R4
+                
+                JAL     .CATO
+                MVI     R4, ' '
+                STOR    M[R2], R3
+                STOR    M[R1], R4
+                
+                JAL     .CATO
+                MVI     R4, ' '
+                STOR    M[R2], R3
+                STOR    M[R1], R4
+                
+                MVI     R4, 4
+                JAL     .SALVARP
+                     
+                LOAD    R7, M[R6]
+                DEC     R6
+                STOR    M[R2], R3
+                JMP     R7  
+                
+.CATO:          MVI     R1, 100h
+                SUB     R3, R3, R1
+                MVI     R1, TERM_WRITE
+                JMP     R7
+                
+.SALVARP:       DEC     R4
+                MVI     R1, 100h
+                ADD     R3, R3, R1
+                
+                CMP     R4, R0
+                BR.NZ   .SALVARP
+                
+                MVI     R1, TERM_WRITE
+                JMP     R7;          VOlta para DESENHAJOGO
+                
+;======================================================
+; VERIFICAR_PD  -  Verifica a posicao do dinossauro
+;======================================================       
+
+VERIFICAR_PD:   INC     R6
+                STOR    M[R6], R7; R7 - return da funcao limpar 
+                INC     R6
+                STOR    M[R6], R3
+                INC     R6;        Nesta funcao, se a posicao do dinossauro foi
+                ;                  passada pela funcao limpar, o dinossauro e
+                MVI     R4, 2512h; desenhado
+                CMP     R3, R4;    2512h - uma posicao a frente da do dinossauro
+                BR.NZ   .NPD
+                JAL     DINO;      Desenha o dinossauro
+                
+                DEC     R6
+                LOAD    R3, M[R6]
+                DEC     R6
+                LOAD    R7, M[R6]
+                DEC     R6
+                JMP     R7
+                
+.NPD:           DEC     R6;        Se nao estiver nessa posicao, continua a 
+                LOAD    R3, M[R6]; desenhar o vetor
+                DEC     R6
+                LOAD    R7, M[R6]
+                DEC     R6
+                JMP     R7;        Volta para a funcao limpar
+                
+;======================================================
+; Atualizajogo - Move as posicoes do vetor
+;======================================================
+                
+atualizajogo:   STOR    M[R6], R7
+                INC     R6
+                LOAD    R3, M[R6]  ; valor retornado por geracato
+                
+                MVI     R1, CHAO
+                MVI     R2, COUNTER;      numero posições
+    
+.loop:          DEC     R2
+                INC     R1
+                LOAD    R4, M[R1]
+                DEC     R1
+                STOR    M[R1], R4
+                INC     R1
+
+                CMP     R2, R0;    enquanto R1 != 0, o loop continua
+                BR.P    .loop
+                
+                DEC     R1
+                JAL     geracato
+                STOR    M[R1], R3
+                
+                DEC     R6
+                LOAD    R7, M[R6]
+                
+                JMP     R7  
+;======================================================
+; geracato - gera os catos do jogo
+;======================================================
+                        
+geracato:       INC     R6
+                STOR    M[R6], R1
+                
+                MVI     R1, SEED
+                LOAD    R1, M[R1]
+
+                MVI     R2, HMAX; altura maxima
+                MVI     R4, 1; para AND
+                
+                AND     R5, R1, R4;   R5 = bit
+                SHR     R1
+                
+                CMP     R5, R0;
+                BR.Z    .IF1;               
+                MVI     R4, b400h
+                XOR     R1, R1, R4;    x=XOR(x,b400h)
+ 
+.IF1:           MVI     R4, 62258 ;    valor do intervalo [0, 62258]
+                CMP     R1, R4;
+                BR.C    .RETORNO1
+                BR      .RETORNO2
+                
+.RETORNO1:      MOV     R3, R0;        return 0
+                BR      .FINAL
+                
+.RETORNO2:      DEC     R2;         calculo da altura do cato
+                AND     R2, R1, R2;
+                INC     R2
+                MOV     R3, R2                                                                            
+                
+.FINAL:         MVI     R2, SEED
+                STOR    M[R2], R1
+                
+                LOAD    R1, M[R6]
+                DEC     R6
+                
+                STOR    M[R6], R3
+                
+                JMP     R7 
+;======================================================
+; Cronometro / Scoreboard
+;======================================================
+ORIG    2000
+
+TEMP:           MVI     R1,INT_MASK
+                MVI     R2,INT_MASK_VAL
+                STOR    M[R1],R2
+
+                ; começo do timr
+                MVI     R2,TIMERCOUNT_INIT
+                MVI     R1,TIMER_COUNTER
+                STOR    M[R1],R2          
+                MVI     R2,TIMER_SETSTART
+                STOR    M[R1],R2          
+                MVI     R1,TIME
+                LOAD    R2,M[R1]
+                INC     R2
+                STOR    M[R1],R2
+                ;DISP7_D0
+                MVI     R3,fh
+                AND     R3,R2,R3
+                MVI     R1,DISP7_D0
+                STOR    M[R1],R3
+                ; DISP7_D1
+                SHR     R2
+                SHR     R2
+                SHR     R2
+                SHR     R2
+                MVI     R3,fh
+                AND     R3,R2,R3
+                MVI     R1,DISP7_D1
+                STOR    M[R1],R3
+                ;DISP7_D2
+                SHR     R2
+                SHR     R2
+                SHR     R2
+                SHR     R2
+                MVI     R3,fh
+                AND     R3,R2,R3
+                MVI     R1,DISP7_D2
+                STOR    M[R1],R3
+                ;DISP7_D3
+                SHR     R2
+                SHR     R2
+                SHR     R2
+                SHR     R2
+                MVI     R3,fh
+                AND     R3,R2,R3
+                MVI     R1,DISP7_D3
+                STOR    M[R1],R3
+                
+                JMP     R7
